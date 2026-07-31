@@ -12,10 +12,11 @@ import 'dotenv/config'
 import { Pool } from 'pg'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../../generated/prisma/client'
+import { urlDirecte } from '../../shared/db-url'
 
 const g = globalThis as unknown as { __prisma?: PrismaClient; __pool?: Pool }
 
-export const connectionString = process.env.DIRECT_URL || process.env.DATABASE_URL || ''
+export const connectionString = urlDirecte()
 
 function creer(): PrismaClient {
   if (!connectionString) {

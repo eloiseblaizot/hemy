@@ -1,0 +1,1 @@
+function n(r,t){const e=typeof r=="string"?new Date(r):r;return Number.isNaN(e.getTime())?"":new Intl.DateTimeFormat("fr-FR",t??{day:"numeric",month:"long",year:"numeric"}).format(e)}function a(r){return new Intl.NumberFormat("fr-FR").format(r)}function m(r,t){return t?Math.round(r/t*100):0}export{a,n as f,m as p};

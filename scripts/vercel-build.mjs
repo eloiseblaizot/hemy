@@ -15,13 +15,19 @@ const run = (cmd) => {
   execSync(cmd, { stdio: 'inherit' })
 }
 
+// `nuxt prepare` d'abord : il crée .nuxt/tsconfig.json, que le CLI Prisma lit.
+// Sans lui, `prisma generate` échoue sur un clone frais (ou quand Vercel
+// restaure son cache de dépendances et saute le postinstall).
+run('nuxt prepare')
 run('prisma generate')
 
 const env = process.env.VERCEL_ENV
-const aUneBase = Boolean(process.env.DIRECT_URL || process.env.DATABASE_URL)
+const aUneBase = ['DIRECT_URL', 'DATABASE_URL_UNPOOLED', 'POSTGRES_URL_NON_POOLING', 'DATABASE_URL', 'POSTGRES_URL'].some(
+  (n) => process.env[n]?.trim(),
+)
 
 if (!aUneBase) {
-  console.warn('\n⚠  Ni DIRECT_URL ni DATABASE_URL : migrations ignorées.')
+  console.warn('\n⚠  Aucune URL de base de données trouvée : migrations ignorées.')
 } else if (!env || env === 'production') {
   run('prisma migrate deploy')
 } else {

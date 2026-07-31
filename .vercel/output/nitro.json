@@ -1,0 +1,37 @@
+{
+  "date": "2026-07-31T09:03:14.574Z",
+  "preset": "vercel",
+  "framework": {
+    "name": "nuxt",
+    "version": "4.4.8"
+  },
+  "versions": {
+    "nitro": "2.13.4"
+  },
+  "commands": {
+    "preview": "",
+    "deploy": "npx vercel deploy --prebuilt"
+  },
+  "config": {
+    "vercel": {
+      "skewProtection": false,
+      "functions": {
+        "runtime": "nodejs24.x",
+        "maxDuration": 60,
+        "memory": 1024,
+        "regions": [
+          "cdg1"
+        ]
+      },
+      "config": {
+        "version": 3,
+        "crons": [
+          {
+            "path": "/api/cron/sync",
+            "schedule": "20 5 * * *"
+          }
+        ]
+      }
+    }
+  }
+}

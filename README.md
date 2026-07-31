@@ -124,9 +124,14 @@ Deux variables d'environnement, sur les trois environnements Vercel :
 | Variable | Valeur |
 | --- | --- |
 | `DATABASE_URL` | connexion **poolée** (`…-pooler…`) — utilisée par le site |
-| `DIRECT_URL` | connexion **directe** — utilisée par les migrations et l'ingestion |
-| `CRON_SECRET` | `openssl rand -hex 32` |
+| `DIRECT_URL` | connexion **directe** — migrations et ingestion |
+| `CRON_SECRET` | `openssl rand -hex 32` — sans lui, `/api/cron/sync` refuse tout appel |
 | `NUXT_PUBLIC_SITE_URL` | (optionnel) URL publique, pour `robots.txt` et le sitemap |
+
+Avec l'intégration Neon du marketplace Vercel, `DATABASE_URL` et
+`DATABASE_URL_UNPOOLED` sont injectées automatiquement : il n'y a alors **rien à
+créer à la main** hormis `CRON_SECRET`. Le code accepte aussi les variantes
+`POSTGRES_URL` / `POSTGRES_URL_NON_POOLING` (voir `shared/db-url.ts`).
 
 ### 2. Déploiement
 

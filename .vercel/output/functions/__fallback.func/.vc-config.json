@@ -1,0 +1,12 @@
+{
+  "runtime": "nodejs24.x",
+  "maxDuration": 60,
+  "memory": 1024,
+  "regions": [
+    "cdg1"
+  ],
+  "handler": "index.mjs",
+  "launcherType": "Nodejs",
+  "shouldAddHelpers": false,
+  "supportsResponseStreaming": true
+}

@@ -18,7 +18,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  // L'URL est fournie par prisma.config.ts.
+  // L'URL est fournie par prisma.config.mjs.
 }
 
 enum PositionVote {
