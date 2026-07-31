@@ -2,8 +2,11 @@
 // Le module `scripts/sync.ts` reste importable par le serveur Nitro : il ne
 // doit contenir aucun `await` de premier niveau (cible es2019 côté Nitro).
 import { closeDb } from '../lib/prisma'
+import { verifierSchema } from '../lib/preflight'
 import { synchronisationEnCours } from '../lib/store'
 import { synchroniser } from '../sync'
+
+await verifierSchema()
 
 if (process.env.SYNC_FULL !== '1' && (await synchronisationEnCours())) {
   console.log('⏭  Une synchronisation est déjà en cours (verrou de 20 min). Abandon.')

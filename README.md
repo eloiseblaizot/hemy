@@ -146,11 +146,18 @@ seule fonction.
 
 ### 3. Premier chargement
 
-Depuis un poste, en pointant `DIRECT_URL` sur la base de production :
+Depuis un poste, en pointant `DIRECT_URL` sur la base de production. **Les
+migrations d'abord** : une base neuve n'a aucune table, et l'ingestion s'arrête
+avec un message explicite si le schéma manque.
 
 ```bash
-DIRECT_URL="postgresql://…" npm run sync:full
+export DIRECT_URL="postgresql://…"   # URL directe, sans « -pooler »
+npx prisma migrate deploy            # crée le schéma
+npm run sync:full                    # charge les données (2 à 5 min)
 ```
+
+Si le déploiement Vercel a déjà réussi, les migrations ont été appliquées
+pendant le build et la première commande n'a rien à faire.
 
 ### 4. Mise à jour quotidienne
 
