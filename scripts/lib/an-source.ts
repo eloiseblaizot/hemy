@@ -219,7 +219,7 @@ export async function anAllScrutins(
   force = false,
   filter?: (numero: number) => boolean,
   totalAttendu?: number,
-): Promise<any[]> {
+): Promise<{ scrutin: any; crc: string }[]> {
   const lire = async (f: boolean) => {
     const buf = await download(AN_SCRUTINS_ZIP, { filename: 'Scrutins.json.zip', force: f })
     return unzip(buf, (name) => name.endsWith('.json'))
@@ -233,13 +233,20 @@ export async function anAllScrutins(
     files = await lire(true)
   }
 
-  const out: any[] = []
+  const out: { scrutin: any; crc: string }[] = []
   for (const [name, bytes] of Object.entries(files)) {
     if (filter) {
       const m = name.match(/V(\d+)\.json$/i)
       if (!m || !filter(Number(m[1]))) continue
     }
-    out.push(JSON.parse(dec.decode(bytes)).scrutin)
+    // CRC calculé sur le contenu réellement analysé, et non repris du manifeste
+    // en ligne : sinon un zip en cache périmé ferait enregistrer l'empreinte de
+    // la version publiée avec le contenu de l'ancienne, rendant une correction
+    // à la source indétectable au run suivant.
+    out.push({
+      scrutin: JSON.parse(dec.decode(bytes)).scrutin,
+      crc: zlib.crc32(bytes).toString(16).padStart(8, '0'),
+    })
   }
   return out
 }

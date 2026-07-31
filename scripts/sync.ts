@@ -33,8 +33,9 @@ import {
   upsertGroupes,
   upsertElus,
   replaceAppartenances,
-  upsertScrutinAN,
-  upsertScrutinSenat,
+  preparerScrutinAN,
+  preparerScrutinSenat,
+  ecrireScrutins,
   debuterRun,
   terminerRun,
   synchronisationEnCours,
@@ -47,6 +48,7 @@ const FORCE = process.env.INGEST_FORCE === '1'
 const CHAMBRE = process.env.SYNC_CHAMBRE?.toUpperCase()
 const MAX = process.env.SYNC_MAX ? Number.parseInt(process.env.SYNC_MAX, 10) : 0
 const CONCURRENCE = 6 // serveurs institutionnels : on reste courtois
+const LOT = 250 // scrutins écrits par lot (≈ 40 000 votes, quelques requêtes)
 
 async function enLots<T, R>(items: T[], n: number, fn: (item: T) => Promise<R>): Promise<R[]> {
   const out: R[] = []
@@ -104,25 +106,25 @@ async function syncAN() {
   // que des milliers de requêtes Range.
   if (aTraiter.length > 600) {
     const voulus = new Set(aTraiter.map((e) => e.numero))
-    const crcParNumero = new Map(aTraiter.map((e) => [e.numero, e.crc]))
     console.log('  → téléchargement complet du zip (plus efficace à ce volume)')
-    const scrutins = await anAllScrutins(FORCE, (n) => voulus.has(n), head.total)
-    let i = 0
-    for (const s of scrutins) {
-      if (!s?.uid) continue
-      const r = await upsertScrutinAN(s, crcParNumero.get(Number(s.numero)) ?? null)
-      r.cree ? nouveaux++ : maj++
-      if (++i % 500 === 0) console.log(`    … ${i}/${scrutins.length}`)
+    const scrutins = (await anAllScrutins(FORCE, (n) => voulus.has(n), head.total)).filter((x) => x.scrutin?.uid)
+    for (let i = 0; i < scrutins.length; i += LOT) {
+      const lot = scrutins.slice(i, i + LOT).map((x) => preparerScrutinAN(x.scrutin, x.crc))
+      const r = await ecrireScrutins(lot)
+      nouveaux += r.nouveaux
+      maj += r.maj
+      console.log(`    … ${Math.min(i + LOT, scrutins.length)}/${scrutins.length}`)
     }
   } else {
     const resultats = await enLots(aTraiter, CONCURRENCE, async (e) => {
       const s = await anFetchScrutin(e, head)
       return { s, crc: e.crc }
     })
-    for (const { s, crc } of resultats) {
-      if (!s?.uid) continue
-      const r = await upsertScrutinAN(s, crc)
-      r.cree ? nouveaux++ : maj++
+    const prepares = resultats.filter((x) => x.s?.uid).map(({ s, crc }) => preparerScrutinAN(s, crc))
+    for (let i = 0; i < prepares.length; i += LOT) {
+      const r = await ecrireScrutins(prepares.slice(i, i + LOT))
+      nouveaux += r.nouveaux
+      maj += r.maj
     }
   }
 
@@ -200,15 +202,19 @@ async function syncSenat() {
     console.log(`  session ${session}-${session + 1} : ${liste.length} publiés, ${enBase.size} en base, ${aTraiter.length} à traiter`)
 
     const lots = await enLots(aTraiter, CONCURRENCE, async (m) => ({ m, res: await senatVotes(session, m.numero) }))
-    let i = 0
+    const prepares = []
     for (const { m, res } of lots) {
       if (!res || !res.votes.length) {
         console.warn(`    ⚠ scrutin ${session}-${m.numero} : aucun vote récupéré, ignoré`)
         continue
       }
-      const r = await upsertScrutinSenat(session, m, res.votes, groupeAuDate, res.lastModified)
-      r.cree ? nouveaux++ : maj++
-      if (++i % 100 === 0) console.log(`    … ${i}/${lots.length}`)
+      prepares.push(preparerScrutinSenat(session, m, res.votes, groupeAuDate, res.lastModified))
+    }
+    for (let i = 0; i < prepares.length; i += LOT) {
+      const r = await ecrireScrutins(prepares.slice(i, i + LOT))
+      nouveaux += r.nouveaux
+      maj += r.maj
+      console.log(`    … ${Math.min(i + LOT, prepares.length)}/${prepares.length}`)
     }
   }
 

@@ -154,18 +154,19 @@ const AN_CATEGORIES: [string, PositionVote][] = [
   ['nonVotants', 'NON_VOTANT'],
 ]
 
-export interface ScrutinEcrit {
-  id: string
-  cree: boolean
-  votes: number
+export interface ScrutinPrepare {
+  chambre: string
+  scrutin: Record<string, unknown> & { id: string }
+  analyses: any[]
+  votes: any[]
 }
 
 /**
- * Écrit un scrutin de l'AN (objet `scrutin` de l'open data).
+ * Prépare un scrutin de l'AN (objet `scrutin` de l'open data) — aucune écriture.
  * Pièges gérés : `votant` tantôt objet tantôt tableau, catégories à null,
  * valeurs numériques en texte, position déduite de la clé parente, doublons.
  */
-export async function upsertScrutinAN(s: any, checksum: string | null): Promise<ScrutinEcrit> {
+export function preparerScrutinAN(s: any, checksum: string | null): ScrutinPrepare {
   const synth = s.syntheseVote ?? {}
   const d = synth.decompte ?? {}
   const numero = String(s.numero ?? '')
@@ -232,22 +233,23 @@ export async function upsertScrutinAN(s: any, checksum: string | null): Promise<
     }
   }
 
-  const existait = await prisma.scrutin.findUnique({ where: { id: s.uid }, select: { id: true } })
-  await prisma.scrutin.upsert({ where: { id: s.uid }, create: { id: s.uid, ...data }, update: data })
-  await ensureElusFantomes([...votes.keys()], 'AN', null)
-  await ecrireDetail(s.uid, [...analyses.values()], [...votes.values()])
-  return { id: s.uid, cree: !existait, votes: votes.size }
+  return {
+    chambre: 'AN',
+    scrutin: { id: s.uid, ...data },
+    analyses: [...analyses.values()],
+    votes: [...votes.values()],
+  }
 }
 
 // ------------------------------------------------------------- scrutins Sénat
 
-export async function upsertScrutinSenat(
+export function preparerScrutinSenat(
   session: number,
   meta: { numero: number; date: Date; objet: string; sortCode: string },
   votes: { eluId: string; position: PositionVote }[],
   groupeAuDate: (eluId: string, date: Date) => string | null,
   checksum: string | null,
-): Promise<ScrutinEcrit> {
+): ScrutinPrepare {
   const id = `SEN-${session}-${meta.numero}`
   const compte = { POUR: 0, CONTRE: 0, ABSTENTION: 0, NON_VOTANT: 0 }
   const parGroupe = new Map<string, { pour: number; contre: number; abstentions: number; nonVotants: number }>()
@@ -314,22 +316,48 @@ export async function upsertScrutinSenat(
     ...gc,
   }))
 
-  const existait = await prisma.scrutin.findUnique({ where: { id }, select: { id: true } })
-  await prisma.scrutin.upsert({ where: { id }, create: { id, ...data }, update: data })
-  await ensureElusFantomes([...rows.keys()], 'SENAT', null)
-  await ecrireDetail(id, analyses, [...rows.values()])
-  return { id, cree: !existait, votes: rows.size }
+  return { chambre: 'SENAT', scrutin: { id, ...data }, analyses, votes: [...rows.values()] }
 }
 
-/** Remplace le détail d'un scrutin (analyses + votes) : rejouable à l'identique. */
-async function ecrireDetail(scrutinId: string, analyses: any[], votes: any[]) {
+// ------------------------------------------------------ écriture en lots
+//
+// L'écriture scrutin par scrutin coûtait ~6 allers-retours chacun : acceptable
+// sur une base locale, ruineux sur une base distante (8434 scrutins × 6 × 100 ms
+// de latence ≈ 1h30 de pure attente). On regroupe donc par lots, ce qui ramène
+// le chargement complet à quelques centaines de requêtes.
+
+/** Écrit un lot de scrutins préparés. Rejouable : le détail est remplacé. */
+export async function ecrireScrutins(lot: ScrutinPrepare[]): Promise<{ nouveaux: number; maj: number }> {
+  if (!lot.length) return { nouveaux: 0, maj: 0 }
   const groupeIds = await groupesConnus()
-  await prisma.scrutinGroupe.deleteMany({ where: { scrutinId } })
-  await prisma.voteNominatif.deleteMany({ where: { scrutinId } })
-  const a = analyses.filter((x) => groupeIds.has(x.groupeId))
-  if (a.length) await prisma.scrutinGroupe.createMany({ data: a })
-  const v = votes.map((x) => (x.groupeId && groupeIds.has(x.groupeId) ? x : { ...x, groupeId: null }))
-  await chunked(v, (part) => prisma.voteNominatif.createMany({ data: part }))
+  const ids = lot.map((p) => p.scrutin.id)
+
+  // Élus référencés par les votes mais absents du référentiel (anciens élus).
+  const eluIds = [...new Set(lot.flatMap((p) => p.votes.map((v: any) => v.eluId)))]
+  await ensureElusFantomes(eluIds, lot[0].chambre, null)
+
+  // Lesquels existaient déjà ? (pour distinguer création et mise à jour)
+  const existants = new Set(
+    (await prisma.scrutin.findMany({ where: { id: { in: ids } }, select: { id: true } })).map((x) => x.id),
+  )
+
+  // Supprimer puis recréer : la suppression du scrutin efface son détail en
+  // cascade, ce qui évite deux deleteMany supplémentaires.
+  if (existants.size) await prisma.scrutin.deleteMany({ where: { id: { in: [...existants] } } })
+  await chunked(
+    lot.map((p) => p.scrutin),
+    (part) => prisma.scrutin.createMany({ data: part }),
+  )
+
+  const analyses = lot.flatMap((p) => p.analyses).filter((a) => groupeIds.has(a.groupeId))
+  await chunked(analyses, (part) => prisma.scrutinGroupe.createMany({ data: part }))
+
+  const votes = lot
+    .flatMap((p) => p.votes)
+    .map((v) => (v.groupeId && groupeIds.has(v.groupeId) ? v : { ...v, groupeId: null }))
+  await chunked(votes, (part) => prisma.voteNominatif.createMany({ data: part }))
+
+  return { nouveaux: ids.length - existants.size, maj: existants.size }
 }
 
 // --------------------------------------------------------------- journalisation
