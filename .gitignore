@@ -1,6 +1,7 @@
 # Nuxt
 .nuxt
 .output
+.vercel
 .data
 .nitro
 .cache

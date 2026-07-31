@@ -1,1 +1,0 @@
-{"version":3,"file":"db-url.mjs","sources":["../../../../../../node_modules/@prisma/client/runtime/client.js","../../../../../../generated/prisma/internal/class.ts","../../../../../../generated/prisma/client.ts","../../../../../../shared/db-url.ts"],"names":["global","runtime.getPrismaClient","path","$Class.getPrismaClientClass"],"mappings":"","x_google_ignoreList":[0]}
