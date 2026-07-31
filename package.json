@@ -1,0 +1,49 @@
+{
+  "name": "hemy",
+  "private": true,
+  "type": "module",
+  "description": "Hemy — visualisation des scrutins de l'Assemblée nationale et du Sénat",
+  "scripts": {
+    "dev": "nuxt dev",
+    "build": "node scripts/vercel-build.mjs",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "prisma generate && nuxt prepare",
+    "db:dev": "tsx scripts/dev-db.ts",
+    "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
+    "sync": "tsx scripts/cli/sync.ts",
+    "sync:full": "SYNC_FULL=1 tsx scripts/cli/sync.ts",
+    "presence": "tsx scripts/cli/presence.ts",
+    "search:reindex": "tsx scripts/cli/reindex.ts",
+    "stats": "tsx scripts/db-stats.ts"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "^7.9.1",
+    "@prisma/client": "^7.9.1",
+    "@tailwindcss/vite": "^4.3.2",
+    "@types/node": "^26.1.1",
+    "@vercel/functions": "^3.7.6",
+    "csv-parse": "^7.0.1",
+    "dotenv": "^17.4.2",
+    "fflate": "^0.8.3",
+    "iconv-lite": "^0.7.3",
+    "nuxt": "^4.4.8",
+    "pg": "^8.22.0",
+    "pg-copy-streams": "^7.0.0",
+    "tailwindcss": "^4.3.2",
+    "tsx": "^4.23.0",
+    "typescript": "^6.0.3",
+    "vue": "^3.5.39",
+    "vue-router": "^5.1.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0",
+    "embedded-postgres": "^18.4.0-beta.17",
+    "prisma": "^7.9.1"
+  },
+  "engines": {
+    "node": "24.x"
+  }
+}

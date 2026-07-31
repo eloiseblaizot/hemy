@@ -1,0 +1,30 @@
+# Nuxt
+.nuxt
+.output
+.data
+.nitro
+.cache
+dist
+
+# Node
+node_modules
+*.log
+.DS_Store
+
+# Prisma / SQLite
+generated
+prisma/*.db
+prisma/*.db-journal
+prisma/*.db-wal
+prisma/*.db-shm
+
+# Fichiers open data téléchargés (cache d'ingestion)
+.ingest-cache
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Postgres local de dev
+.pgdata

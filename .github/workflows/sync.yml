@@ -1,0 +1,59 @@
+name: Mise à jour des scrutins
+
+# Porte la synchronisation quotidienne : contrairement à une fonction
+# serverless, un job GitHub Actions n'a pas de plafond de quelques minutes, ce
+# qui laisse la marge nécessaire à un rattrapage (retour de vacances
+# parlementaires, correction en masse à la source).
+#
+# Minute volontairement non ronde : les crons GitHub sont souvent retardés aux
+# heures pleines. Horaire UTC.
+on:
+  schedule:
+    - cron: '37 4 * * *'
+  workflow_dispatch:
+    inputs:
+      full:
+        description: 'Recharger tous les scrutins (backfill complet)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: sync-scrutins
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci
+        env:
+          # Le postinstall lance `prisma generate` : pas besoin de base.
+          PRISMA_SKIP_POSTINSTALL_GENERATE: '0'
+
+      - name: Appliquer les migrations en attente
+        run: npx prisma migrate deploy
+        env:
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Synchroniser les scrutins
+        run: npm run ${{ inputs.full && 'sync:full' || 'sync' }}
+        env:
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+      - name: Statistiques
+        if: always()
+        run: npm run stats
+        env:
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}

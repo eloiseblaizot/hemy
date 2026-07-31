@@ -1,0 +1,230 @@
+// Schéma Prisma — Hemy (Assemblée nationale + Sénat)
+//
+// PostgreSQL (Neon en production, Postgres local en développement).
+// Choix de modélisation mesurés : PK composite sur VoteNominatif (économise
+// ~39 Mo d'index sur 1,4 M lignes), un seul index secondaire `eluId`, enum
+// natif pour la position, et `@db.Date` sur les dates civiles (sinon décalage
+// de fuseau : un scrutin du 14/03 s'affiche le 13/03 en UTC−).
+//
+// La table de recherche plein-texte `search_index` (tsvector + GIN + trigram)
+// n'est PAS modélisée ici : Prisma ne gère pas `tsvector`. Elle est créée et
+// interrogée en SQL brut (voir prisma/migrations/*_recherche_fr).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+  runtime  = "nodejs"
+}
+
+datasource db {
+  provider = "postgresql"
+  // L'URL est fournie par prisma.config.ts.
+}
+
+enum PositionVote {
+  POUR
+  CONTRE
+  ABSTENTION
+  NON_VOTANT
+}
+
+/// Un élu : député (chambre = "AN") ou sénateur (chambre = "SENAT").
+model Elu {
+  id             String    @id // AN : uid acteur (PAxxxx) — Sénat : matricule (ex "83008P")
+  chambre        String // "AN" | "SENAT"
+  civilite       String?
+  prenom         String
+  nom            String
+  slug           String    @unique
+  dateNaissance  DateTime? @db.Date
+  profession     String?
+  region         String?
+  departement    String? // libellé (ex "Gironde")
+  numDepartement String? // code (ex "33", "2A", "971") — clé de « mes élus »
+  numCirco       String? // AN uniquement
+  photoUrl       String?
+  actif          Boolean   @default(true)
+  legislature    String?
+  groupeId       String?
+  roleGroupe     String?
+
+  groupe        Groupe?              @relation(fields: [groupeId], references: [id])
+  votes         VoteNominatif[]
+  appartenances AppartenanceGroupe[]
+  stats         StatPresence[]
+
+  @@index([chambre])
+  @@index([numDepartement])
+  @@index([groupeId])
+  @@index([nom])
+}
+
+/// Un groupe politique (par chambre).
+model Groupe {
+  id            String  @id // AN : uid organe (POxxxx) — Sénat : "SEN-<code>"
+  chambre       String
+  code          String
+  libelle       String
+  libelleAbrege String?
+  couleur       String
+  ordre         Int     @default(0) // gauche -> droite dans l'hémicycle
+  legislature   String?
+
+  elus          Elu[]
+  votes         VoteNominatif[]
+  analyses      ScrutinGroupe[]
+  appartenances AppartenanceGroupe[]
+
+  @@index([chambre])
+}
+
+/// Appartenance datée d'un élu à un groupe.
+/// Sert aussi de FENÊTRE DE MANDAT pour le calcul des votes en personne :
+/// à l'AN les mandats « GP » sont la seule fenêtre auto-cohérente (les
+/// mandats ASSEMBLEE recopient dateDebut lors des reprises de mandat).
+model AppartenanceGroupe {
+  id        Int       @id @default(autoincrement())
+  eluId     String
+  groupeId  String
+  dateDebut DateTime? @db.Date
+  dateFin   DateTime? @db.Date // null = en cours (au Sénat, peut être une date future)
+  fonction  String?
+
+  elu    Elu    @relation(fields: [eluId], references: [id], onDelete: Cascade)
+  groupe Groupe @relation(fields: [groupeId], references: [id])
+
+  @@index([eluId])
+  @@index([groupeId])
+}
+
+/// Un scrutin (vote public).
+model Scrutin {
+  id                 String   @id // AN : "VTANR5L17V<n>" — Sénat : "SEN-<session>-<n>"
+  chambre            String
+  numero             String
+  numeroInt          Int      @default(0) // tri/diff fiable (numero est du texte)
+  legislature        String?
+  session            String?
+  date               DateTime @db.Date
+  titre              String
+  objet              String?
+  demandeur          String?
+  typeVoteCode       String? // AN : SPO (ordinaire) | SPS (solennel) | MOC (motion de censure)
+  typeVoteLibelle    String?
+  sortCode           String
+  sortLibelle        String?
+  nombreVotants      Int      @default(0)
+  suffragesExprimes  Int?
+  nbrSuffragesRequis Int?
+  pour               Int      @default(0)
+  contre             Int      @default(0)
+  abstentions        Int      @default(0)
+  nonVotants         Int      @default(0)
+  /// Empreinte de la source (CRC32 hex pour l'AN, Last-Modified pour le Sénat) :
+  /// permet de détecter une correction d'un scrutin déjà ingéré.
+  sourceChecksum     String?
+  majAt              DateTime @default(now())
+
+  analyses ScrutinGroupe[]
+  votes    VoteNominatif[]
+
+  @@index([chambre, date])
+  @@index([date])
+  @@index([chambre, typeVoteCode])
+}
+
+/// Résultat agrégé d'un groupe pour un scrutin.
+model ScrutinGroupe {
+  id                  Int     @id @default(autoincrement())
+  scrutinId           String
+  groupeId            String
+  nombreMembres       Int?
+  positionMajoritaire String?
+  pour                Int     @default(0)
+  contre              Int     @default(0)
+  abstentions         Int     @default(0)
+  nonVotants          Int     @default(0)
+
+  scrutin Scrutin @relation(fields: [scrutinId], references: [id], onDelete: Cascade)
+  groupe  Groupe  @relation(fields: [groupeId], references: [id])
+
+  @@unique([scrutinId, groupeId])
+}
+
+/// Vote nominatif d'un élu pour un scrutin.
+/// PK composite : idempotence des upserts + « tous les votes d'un scrutin »,
+/// sans index supplémentaire.
+model VoteNominatif {
+  scrutinId     String
+  eluId         String
+  groupeId      String?
+  position      PositionVote
+  /// AN : vote émis par un collègue au nom du député (= député empêché).
+  parDelegation Boolean      @default(false)
+  /// Non-vote institutionnel : PAN (président de l'AN), PSE (présidence de
+  /// séance), MG (membre du Gouvernement), DEPORT (déport, Sénat).
+  cause         String?      @db.VarChar(8)
+
+  scrutin Scrutin @relation(fields: [scrutinId], references: [id], onDelete: Cascade)
+  elu     Elu     @relation(fields: [eluId], references: [id], onDelete: Cascade)
+  groupe  Groupe? @relation(fields: [groupeId], references: [id])
+
+  @@id([scrutinId, eluId])
+  @@index([eluId])
+}
+
+/// Statistiques « votes en personne » précalculées (recalculées après chaque
+/// ingestion). Jamais calculées à la volée : 1,4 M lignes à agréger.
+/// perimetre : "SOLENNEL" (scrutins solennels + motions de censure) | "TOUS".
+model StatPresence {
+  eluId       String
+  perimetre   String
+  /// Scrutins tenus pendant la fenêtre de mandat de l'élu.
+  eligibles   Int
+  /// Scrutins où l'élu ne pouvait pas voter (fonction institutionnelle).
+  neutralises Int
+  /// Votes exprimés personnellement (hors délégation).
+  personnels  Int
+  /// Votes émis en son nom par un collègue.
+  delegations Int
+  /// personnels / (eligibles - neutralises), en %. Null si non calculable.
+  taux        Float?
+  /// Indicateur non publiable (dénominateur trop faible ou fonction institutionnelle).
+  applicable  Boolean  @default(true)
+  motif       String? // raison de non-applicabilité
+  calculeeLe  DateTime @default(now())
+
+  elu Elu @relation(fields: [eluId], references: [id], onDelete: Cascade)
+
+  @@id([eluId, perimetre])
+  @@index([perimetre])
+}
+
+/// Repères de distribution par chambre/périmètre, pour situer un élu sans
+/// publier de classement.
+model StatDistribution {
+  chambre    String
+  perimetre  String
+  nbElus     Int
+  mediane    Float
+  p10        Float
+  p90        Float
+  calculeeLe DateTime @default(now())
+
+  @@id([chambre, perimetre])
+}
+
+/// Journal des synchronisations (fraîcheur des données + verrou anti-concurrence).
+model IngestRun {
+  id          Int       @id @default(autoincrement())
+  source      String // "AN" | "SENAT" | "PRESENCE" | "SYNC"
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  ok          Boolean   @default(false)
+  nbNouveaux  Int       @default(0)
+  nbMaj       Int       @default(0)
+  message     String?
+  erreur      String?
+
+  @@index([source, startedAt])
+}
